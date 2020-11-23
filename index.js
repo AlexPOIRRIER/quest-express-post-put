@@ -7,7 +7,7 @@ const connection = require('./db');
 
 const app = express();
 app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.urlencoded({ extended: true }));
 
 // respond to requests on `/api/users`
 app.get('/api/users', (req, res) => {
@@ -35,6 +35,42 @@ const userValidationMiddlewares = [
   check('name').isLength({ min: 2 }),
 ];
 
+app.put('/api/users/:id', userValidationMiddlewares, (req, res) => {
+  const errors = validationResult(req);
+  const userId = req.params.id;
+  const newUser = req.body;
+  if (!errors.isEmpty()) {
+    return res.status(422).json({ errors: errors.array() });
+  }
+  return connection.query(
+    `UPDATE user SET ? WHERE id = ?`, [newUser, userId], (err, results) => {
+      if (err) {
+        return res.status(500).json({
+          error: err.message,
+          sql: err.sql,
+        });
+      }
+      return connection.query('SELECT * FROM user WHERE id = ?', req.params.id,
+        (err2, records) => {
+            if (err2) {
+              return res.status(500).json({
+                error: err2.message,
+                sql: err2.sql,
+              });
+            }
+            const updatedUser = records[0];
+            const { password, ...user } = updatedUser;
+            const host = res.get('host');
+            const location = `http://${host}${req.url}/${user.id}`;
+            return res
+              .status(201)
+              .set('Location', location)
+              .json(user);
+          });
+      });
+    },
+  );
+
 app.post(
   '/api/users',
   userValidationMiddlewares,
@@ -53,27 +89,28 @@ app.post(
         });
       }
       // We use the insertId attribute of results to build the WHERE clause
-      return connection.query('SELECT * FROM user WHERE id = ?', results.insertId, (err2, records) => {
-        if (err2) {
-          return res.status(500).json({
-            error: err2.message,
-            sql: err2.sql,
-          });
-        }
-        // If all went well, records is an array, from which we use the 1st item
-        const insertedUser = records[0];
-        // Extract all the fields *but* password as a new object (user)
-        const { password, ...user } = insertedUser;
-        // Get the host + port (localhost:3000) from the request headers
-        const host = req.get('host');
-        // Compute the full location, e.g. http://localhost:3000/api/users/132
-        // This will help the client know where the new resource can be found!
-        const location = `http://${host}${req.url}/${user.id}`;
-        return res
-          .status(201)
-          .set('Location', location)
-          .json(user);
-      });
+      return connection.query('SELECT * FROM user WHERE id = ?', results.insertId,
+        (err2, records) => {
+          if (err2) {
+            return res.status(500).json({
+              error: err2.message,
+              sql: err2.sql,
+            });
+          }
+          // If all went well, records is an array, from which we use the 1st item
+          const insertedUser = records[0];
+          // Extract all the fields *but* password as a new object (user)
+          const { password, ...user } = insertedUser;
+          // Get the host + port (localhost:3000) from the request headers
+          const host = req.get('host');
+          // Compute the full location, e.g. http://localhost:3000/api/users/132
+          // This will help the client know where the new resource can be found!
+          const location = `http://${host}${req.url}/${user.id}`;
+          return res
+            .status(201)
+            .set('Location', location)
+            .json(user);
+        });
     });
   },
 );
